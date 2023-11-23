@@ -1,0 +1,24 @@
+#define IDI_MAIN 101
+#define IDR_MAINMENU 102
+#define IDD_ABOUTDIALOG 103
+#define IDB_BACKUP_GAMESAVE 104
+#define IDB_RESTORE_GAMESAVE 105
+#define IDC_LIST 106
+#define IDB_SELECT_ALL 107
+#define IDB_DESELECT_ALL 108
+#define IDB_CANCEL 109
+#define IDB_OK 110
+#define IDD_PROGRESSDIALOG 111
+#define IDPBC_PROGRESS_BAR 112
+#define IDI_BACKUP 113
+#define IDI_RESTORE 114
+
+#define ID_FILE_EXIT 40001
+#define ID_HELP_ABOUT 40002
+
+#ifndef IDC_STATIC
+	#define IDC_STATIC -1
+#endif
+
+#define APP_NAME L"Gamesave Helper"
+#define APP_VERSION_NAME L"Version 1.0"
