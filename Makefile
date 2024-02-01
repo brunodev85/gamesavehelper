@@ -1,8 +1,7 @@
-OBJS=obj/main.o obj/text_utils.o obj/common_gamesave_wnd.o obj/resource.o
+OBJS=obj/main.o obj/common_gamesave_wnd.o obj/resource.o
 INCLUDE_DIR=-I.\include
 WARNS=-Wall
 
-CC=gcc
 LDFLAGS=-s -lcomctl32 -Wl,--subsystem,windows
 RC=windres
 CFLAGS=-O3 -std=c99 -DUNICODE -D_UNICODE -D_WIN32_IE=0x0500 -DWINVER=0x500 ${WARNS}

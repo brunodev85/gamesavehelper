@@ -16,9 +16,6 @@
 
 #include "resource.h"
 
-#define PBS_MARQUEE 0x08
-#define PBM_SETMARQUEE (WM_USER+10)
-
 #define SMALL_BUTTON_WIDTH 100
 #define SMALL_BUTTON_HEIGHT 30
 #define LARGE_BUTTON_WIDTH 195
@@ -29,9 +26,11 @@
 #define ACTION_BACKUP 1
 #define ACTION_RESTORE 2
 
-HINSTANCE globalHInstance;
+//#define DEBUG
 
+#ifdef DEBUG
 void debug_printf(const char *fmt, ...);
+#endif
 
 DWORD sysexec(char* command);
 

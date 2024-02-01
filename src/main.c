@@ -1,6 +1,7 @@
 #include "main.h"
 #include "common_gamesave_wnd.h"
 
+#ifdef DEBUG
 void debug_printf(const char *fmt, ...) {
 	FILE *f = fopen("debug.txt", "a");
 	if (f == NULL) return;
@@ -10,6 +11,9 @@ void debug_printf(const char *fmt, ...) {
     va_end(args);
 	fclose(f);
 }
+#endif
+
+HINSTANCE globalHInstance = NULL;
 
 DWORD sysexec(char* command) {
 	char* cmdPath = "c:\\windows\\system32\\cmd.exe";
@@ -72,13 +76,13 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 			HWND button;
 			HICON hicon;
 			
-			button = CreateWindowW(L"BUTTON", L" Backup Gamesaves", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON , centerX, centerY - (halfHeight + MARGIN), LARGE_BUTTON_WIDTH, LARGE_BUTTON_HEIGHT, 
-							       hwnd, (HMENU)IDB_BACKUP_GAMESAVE, globalHInstance, NULL);
+			button = CreateWindowEx(0, WC_BUTTON, L" Backup Gamesaves", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 
+									centerX, centerY - (halfHeight + MARGIN), LARGE_BUTTON_WIDTH, LARGE_BUTTON_HEIGHT, hwnd, (HMENU)IDB_BACKUP_GAMESAVE, globalHInstance, NULL);
 			hicon = LoadIcon(globalHInstance, MAKEINTRESOURCE(IDI_BACKUP));
 			SendMessageW(button, BM_SETIMAGE, IMAGE_ICON, (LPARAM)hicon);								   
 						  
-			button = CreateWindowW(L"BUTTON", L" Restore Gamesaves", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON , centerX, centerY + (halfHeight + MARGIN), LARGE_BUTTON_WIDTH, LARGE_BUTTON_HEIGHT, 
-					  			   hwnd, (HMENU)IDB_RESTORE_GAMESAVE, globalHInstance, NULL);
+			button = CreateWindowEx(0, WC_BUTTON, L" Restore Gamesaves", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 
+									centerX, centerY + (halfHeight + MARGIN), LARGE_BUTTON_WIDTH, LARGE_BUTTON_HEIGHT, hwnd, (HMENU)IDB_RESTORE_GAMESAVE, globalHInstance, NULL);
 			hicon = LoadIcon(globalHInstance, MAKEINTRESOURCE(IDI_RESTORE));
 			SendMessageW(button, BM_SETIMAGE, IMAGE_ICON, (LPARAM)hicon);
 			return 0;
@@ -127,7 +131,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	wcx.hInstance = hInstance;
 	wcx.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_MAIN));
 	wcx.hCursor = LoadCursor(hInstance, IDC_ARROW);
-	wcx.hbrBackground = (HBRUSH)COLOR_WINDOW;
+	wcx.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
 	wcx.lpszMenuName = MAKEINTRESOURCE(IDR_MAINMENU);
 	wcx.lpszClassName = APP_NAME;
 	wcx.hIconSm = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_MAIN));

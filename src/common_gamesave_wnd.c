@@ -1,25 +1,26 @@
 #include "main.h"
 #include "common_gamesave_wnd.h"
-#include "text_utils.h"
 
-struct Gamedata {
-	char name[64];
-	char path[128];
+struct ListItem {
+	wchar_t* name;
+	wchar_t* path;
 };
 
 enum Msg {
 	MSG_CLOSE = WM_APP
 };
 
-HWND hwndStatic; 
-HWND hwndList;
-HWND hwndDlg;
-bool backupWndClassRegistered = false;
-bool restoreWndClassRegistered = false;
-struct Gamedata* items = NULL;
-int action;
-int numItems = 0;
-bool hasSelectedItems = false;
+static HWND hwndStatic; 
+static HWND hwndList;
+static HWND hwndDlg;
+static bool backupWndClassRegistered = false;
+static bool restoreWndClassRegistered = false;
+static struct ListItem* items = NULL;
+static int action;
+static int numItems = 0;
+static bool hasSelectedItems = false;
+
+extern HINSTANCE globalHInstance;
 
 INT_PTR CALLBACK ProgressDialogProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
 	switch (msg) {
@@ -44,7 +45,7 @@ INT_PTR CALLBACK ProgressDialogProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARA
 	return (INT_PTR)FALSE;	
 }
 
-void updateDisplayText() {
+static void updateDisplayText() {
 	int selectedItemCount = 0;
 	for (int i = 0; i < numItems; i++) {
 		if (SendMessage(hwndList, LB_GETSEL, i, 0) > 0) {
@@ -54,80 +55,114 @@ void updateDisplayText() {
 
 	hasSelectedItems = selectedItemCount > 0;
 	wchar_t text[128];
-	swprintf(text, L"Selected items: %d/%d", selectedItemCount, numItems);
+	swprintf_s(text, 128, L"Selected items: %d/%d", selectedItemCount, numItems);
 	SetWindowTextW(hwndStatic, text);
 }
 
-void addItem(char* name, char* path) {
+static void addItem(wchar_t* name, wchar_t* path) {
 	int index = numItems;
 	numItems++;
-	items = realloc(items, numItems * sizeof(struct Gamedata));
-	strcpy(items[index].name, name);
-	strcpy(items[index].path, path);
-
-	wchar_t* wname = towchar(name);
-	SendMessageW(hwndList, LB_ADDSTRING, 0, (LPARAM)wname);	
-	free(wname);
+	items = realloc(items, numItems * sizeof(struct ListItem));
+	
+	int nameLen = wcslen(name);
+	int pathLen = wcslen(path);
+	items[index].name = malloc((nameLen + 1) * sizeof(wchar_t));
+	items[index].path = malloc((pathLen + 1) * sizeof(wchar_t));
+	
+	wcscpy_s(items[index].name, nameLen + 1, name);
+	wcscpy_s(items[index].path, pathLen + 1, path);	
 }
 
-void loadItems() {
-	FILE* f = fopen("gamesave_locations.csv", "r");
-	char line[1024];
+static void addItemFromLine(wchar_t* line) {
+	int textLen = wcslen(line);
+	wchar_t name[128];
+	wchar_t path[MAX_PATH];
+	wmemset(name, '\0', 128);
+	wmemset(path, '\0', MAX_PATH);
+	int i, j;
+	
+	for (i = 0, j = 0; i < textLen && line[i] != ','; i++) name[j++] = line[i];
+	for (i++, j = 0; i < textLen; i++) path[j++] = line[i];
 	
 	if (action == ACTION_BACKUP) {
-		while (fgets(line, 1024, f)) {
-			char* path = getcsvtext(line, 1);
-			DIR* dir = opendir(path);
-			if (dir) {
-				char* name = getcsvtext(line, 0);
-				addItem(name, path);			
-				closedir(dir);
-				free(name);
-			}
-			free(path);
-		}
+		DWORD dwAttrib = GetFileAttributes(path);
+		if (dwAttrib != INVALID_FILE_ATTRIBUTES) addItem(name, path);
 	}
 	else if (action == ACTION_RESTORE) {
-		char originPath[128];
-		while (fgets(line, 1024, f)) {
-			char* name = getcsvtext(line, 0);
-			sprintf(originPath, "savedgames\\%s", name);
-			DIR* dir = opendir(originPath);
-			if (dir) {
-				char* path = getcsvtext(line, 1);
-				addItem(name, path);
-				closedir(dir);
-				free(path);
-			}
-			free(name);
-		}		
+		wchar_t originPath[MAX_PATH];
+		swprintf_s(originPath, MAX_PATH, L"savedgames\\%ls", name);
+		DWORD dwAttrib = GetFileAttributes(originPath);
+		if (dwAttrib != INVALID_FILE_ATTRIBUTES) addItem(name, path);		
 	}
-	
-	fclose(f);	
 }
 
-void backupGamesavesTask(void *data) {
-	mkdir("savedgames");
+static int compare(const void* a, const void* b) {
+	struct ListItem* ia = (struct ListItem*)a;
+	struct ListItem* ib = (struct ListItem*)b;
+	return wcscoll(ia->name, ib->name);
+}
+
+static void loadItems() {
+	HANDLE hFile = CreateFileW(L"gamesave_locations.csv", GENERIC_READ,FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	
+	char data[16384];
+	DWORD bytesRead;
+	ReadFile(hFile, data, 16384, &bytesRead, NULL);
+	
+	wchar_t line[1024];
+	char tmp[512];
+
+	for (int i = 0, j = 0; i < bytesRead; i++) {
+		char chr = data[i];
+		if (chr == '\n' || i == bytesRead-1) {
+			if (i == bytesRead-1) tmp[j++] = chr;
+			if (j > 0) {
+				wmemset(line, '\0', 1024);
+				MultiByteToWideChar(CP_UTF8, 0, tmp, j, line, 1024);
+				addItemFromLine(line);
+			}
+			j = 0;
+		}
+		else if (chr != '\r') {
+			tmp[j++] = chr;
+		}
+	}	
+	
+	CloseHandle(hFile);
+	
+	qsort(items, numItems, sizeof(struct ListItem), compare);
+	for (int i = 0; i < numItems; i++) SendMessageW(hwndList, LB_ADDSTRING, 0, (LPARAM)items[i].name);	
+}
+
+static DWORD WINAPI backupGamesavesTask(void *param) {
+	wchar_t srcPath[MAX_PATH];
+	wchar_t dstPath[MAX_PATH];
 	bool error = false;
-	char command[256];
-	char targetPath[128];
+	CreateDirectory(L"savedgames", NULL);
 	
 	for (int i = 0; i < numItems; i++) {
 		if (SendMessage(hwndList, LB_GETSEL, i, 0) > 0) {
-			sprintf(targetPath, "savedgames\\%s", items[i].name);
-		
-			sprintf(command, "rmdir /s /q \"%s\"", targetPath);
-			sysexec(command);
-						
-			sprintf(command, "xcopy /s /q \"%s\\\" \"%s\\\"", items[i].path, targetPath);
-			sysexec(command);
+			struct ListItem* item = &items[i];
+			swprintf_s(dstPath, MAX_PATH, L"savedgames\\%ls\\", item->name);
+			CreateDirectory(dstPath, NULL);
+			dstPath[wcslen(dstPath)+1] = '\0';
 			
-			DIR* dir = opendir(targetPath);
-			if (!dir) {
+			swprintf_s(srcPath, MAX_PATH, L"%ls\\*", item->path);
+			srcPath[wcslen(srcPath)+1] = '\0';
+			
+			SHFILEOPSTRUCT sfo;
+			memset(&sfo, 0, sizeof(sfo));
+			sfo.hwnd = hwndDlg;
+			sfo.wFunc = FO_COPY;
+			sfo.fFlags = FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_NOCONFIRMMKDIR;
+			sfo.pTo = dstPath;
+			sfo.pFrom = srcPath;
+
+			int res = SHFileOperation(&sfo);	
+			if (res != 0) {
 				error = true;
 				break;
-			}			
-			else closedir(dir);
+			}
 		}
 	}	
 	
@@ -138,26 +173,37 @@ void backupGamesavesTask(void *data) {
 	if (!error) {
 		MessageBox(NULL, (LPCWSTR)L"Files copied successfully.", (LPCWSTR)L"Information", MB_ICONINFORMATION);
 	}
+	
+	return 0;
 }
 
-void restoreGamesavesTask(void *data) {
+static DWORD WINAPI restoreGamesavesTask(void *param) {
+	wchar_t srcPath[MAX_PATH];
+	wchar_t dstPath[MAX_PATH];	
 	bool error = false;
-	char command[256];
-	char originPath[128];
 	
 	for (int i = 0; i < numItems; i++) {
 		if (SendMessage(hwndList, LB_GETSEL, i, 0) > 0) {
-			sprintf(originPath, "savedgames\\%s", items[i].name);
-						
-			sprintf(command, "xcopy /s /y /q \"%s\\\" \"%s\\\"", originPath, items[i].path);
-			sysexec(command);
+			struct ListItem* item = &items[i];
+			swprintf_s(srcPath, MAX_PATH, L"savedgames\\%ls\\*", item->name);
+			srcPath[wcslen(srcPath)+1] = '\0';
 			
-			DIR* dir = opendir(items[i].path);
-			if (!dir) {
+			swprintf_s(dstPath, MAX_PATH, L"%ls\\", item->path);
+			dstPath[wcslen(dstPath)+1] = '\0';
+			
+			SHFILEOPSTRUCT sfo;
+			memset(&sfo, 0, sizeof(sfo));
+			sfo.hwnd = hwndDlg;
+			sfo.wFunc = FO_COPY;
+			sfo.fFlags = FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_NOCONFIRMMKDIR;
+			sfo.pTo = dstPath;
+			sfo.pFrom = srcPath;
+
+			int res = SHFileOperation(&sfo);	
+			if (res != 0) {
 				error = true;
 				break;
-			}			
-			else closedir(dir);
+			}
 		}
 	}	
 	
@@ -168,6 +214,8 @@ void restoreGamesavesTask(void *data) {
 	if (!error) {
 		MessageBox(NULL, (LPCWSTR)L"Files restored successfully.", (LPCWSTR)L"Information", MB_ICONINFORMATION);
 	}
+	
+	return 0;
 }
 
 LRESULT CALLBACK CommonGamesaveWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {	
@@ -203,19 +251,19 @@ LRESULT CALLBACK CommonGamesaveWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 					if (action == ACTION_BACKUP) {
 						hwndDlg = CreateDialogParam(globalHInstance, MAKEINTRESOURCE(IDD_PROGRESSDIALOG), hwnd, ProgressDialogProc, 0);
 						ShowWindow(hwndDlg, SW_SHOW);
-						_beginthread(&backupGamesavesTask, 0, NULL);
+						CreateThread(NULL, 0, backupGamesavesTask, NULL, 0, NULL);
 					}
 					else if (action == ACTION_RESTORE) {
 						hwndDlg = CreateDialogParam(globalHInstance, MAKEINTRESOURCE(IDD_PROGRESSDIALOG), hwnd, ProgressDialogProc, 0);
 						ShowWindow(hwndDlg, SW_SHOW);
-						_beginthread(&restoreGamesavesTask, 0, NULL);
+						CreateThread(NULL, 0, restoreGamesavesTask, NULL, 0, NULL);
 					}
 					break;
 				}				
 			}
 			break;
 		}
-		case WM_CREATE: {		
+		case WM_CREATE: {
 			RECT rect;
 			GetClientRect(hwnd, &rect);
 			int hwndWidth = rect.right - rect.left;
@@ -223,31 +271,31 @@ LRESULT CALLBACK CommonGamesaveWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 			
 			int listBoxWidth = hwndWidth - MARGIN * 2;
 			int listBoxHeight = hwndHeight - BOTTOM_BAR_HEIGHT - MARGIN * 2;
-			hwndList = CreateWindowW(WC_LISTBOXW, NULL, WS_CHILD | WS_VISIBLE | LBS_NOTIFY | WS_VSCROLL | WS_BORDER | LBS_MULTIPLESEL, 
-									 MARGIN, MARGIN, listBoxWidth, listBoxHeight, hwnd, (HMENU)IDC_LIST, NULL, NULL);
+			hwndList = CreateWindowEx(0, WC_LISTBOXW, NULL, WS_CHILD | WS_VISIBLE | LBS_NOTIFY | WS_VSCROLL | WS_BORDER | LBS_MULTIPLESEL, 
+									 MARGIN, MARGIN, listBoxWidth, listBoxHeight, hwnd, (HMENU)IDC_LIST, globalHInstance, NULL);
 			
 			loadItems();
 			
 			int offsetX = MARGIN;
 			int offsetY = hwndHeight - BOTTOM_BAR_HEIGHT - MARGIN * 2;
 			int textBoxWidth = hwndWidth - (SMALL_BUTTON_WIDTH + MARGIN) * 4 - MARGIN * 2;
-			hwndStatic = CreateWindowW(WC_STATICW, NULL, WS_CHILD | WS_VISIBLE,
-									   offsetX, offsetY + 5, textBoxWidth, SMALL_BUTTON_HEIGHT - 10, hwnd, (HMENU)IDC_STATIC, NULL, NULL);
+			hwndStatic = CreateWindowEx(0, WC_STATICW, NULL, WS_CHILD | WS_VISIBLE,
+									   offsetX, offsetY + 5, textBoxWidth, SMALL_BUTTON_HEIGHT - 10, hwnd, (HMENU)IDC_STATIC, globalHInstance, NULL);
 									   
 			offsetX += textBoxWidth + MARGIN;
-			CreateWindowW(L"BUTTON", L"Select All", WS_CHILD | WS_VISIBLE, offsetX, offsetY, SMALL_BUTTON_WIDTH, SMALL_BUTTON_HEIGHT, 
+			CreateWindowEx(0, WC_BUTTON, L"Select All", WS_CHILD | WS_VISIBLE, offsetX, offsetY, SMALL_BUTTON_WIDTH, SMALL_BUTTON_HEIGHT, 
 						  hwnd, (HMENU)IDB_SELECT_ALL, globalHInstance, NULL);
 
 			offsetX += SMALL_BUTTON_WIDTH + MARGIN;
-			CreateWindowW(L"BUTTON", L"Deselect All", WS_CHILD | WS_VISIBLE, offsetX, offsetY, SMALL_BUTTON_WIDTH, SMALL_BUTTON_HEIGHT, 
+			CreateWindowEx(0, WC_BUTTON, L"Deselect All", WS_CHILD | WS_VISIBLE, offsetX, offsetY, SMALL_BUTTON_WIDTH, SMALL_BUTTON_HEIGHT, 
 						  hwnd, (HMENU)IDB_DESELECT_ALL, globalHInstance, NULL);
 
 			offsetX += SMALL_BUTTON_WIDTH + MARGIN;
-			CreateWindowW(L"BUTTON", L"Cancel", WS_CHILD | WS_VISIBLE, offsetX, offsetY, SMALL_BUTTON_WIDTH, SMALL_BUTTON_HEIGHT, 
+			CreateWindowEx(0, WC_BUTTON, L"Cancel", WS_CHILD | WS_VISIBLE, offsetX, offsetY, SMALL_BUTTON_WIDTH, SMALL_BUTTON_HEIGHT, 
 						  hwnd, (HMENU)IDB_CANCEL, globalHInstance, NULL);	
 
 			offsetX += SMALL_BUTTON_WIDTH + MARGIN;
-			CreateWindowW(L"BUTTON", L"OK", WS_CHILD | WS_VISIBLE, offsetX, offsetY, SMALL_BUTTON_WIDTH, SMALL_BUTTON_HEIGHT, 
+			CreateWindowEx(0, WC_BUTTON, L"OK", WS_CHILD | WS_VISIBLE, offsetX, offsetY, SMALL_BUTTON_WIDTH, SMALL_BUTTON_HEIGHT, 
 						  hwnd, (HMENU)IDB_OK, globalHInstance, NULL);	
 
 			updateDisplayText();
@@ -270,20 +318,21 @@ void initCommonGamesaveWindow(int _action) {
 	action = _action;
 	HINSTANCE hInstance = globalHInstance;
 	
-	LPCTSTR wndClass = NULL;
+	LPCTSTR wndClassName = NULL;
 	bool* wndClassRegistered = false;
 	
 	if (action == ACTION_BACKUP) {
-		wndClass = L"Backup Gamesaves";
+		wndClassName = L"Backup Gamesaves";
 		wndClassRegistered = &backupWndClassRegistered;
 	}
 	else if (action == ACTION_RESTORE) {
-		wndClass = L"Restore Gamesaves";
+		wndClassName = L"Restore Gamesaves";
 		wndClassRegistered = &restoreWndClassRegistered;
 	}
 	
 	if (!(*wndClassRegistered)) {
 		WNDCLASSEX wcx;
+		memset(&wcx, 0, sizeof(wcx));
 		wcx.cbSize = sizeof(wcx);
 		wcx.style = CS_HREDRAW | CS_VREDRAW;
 		wcx.lpfnWndProc = &CommonGamesaveWndProc;
@@ -291,9 +340,9 @@ void initCommonGamesaveWindow(int _action) {
 		wcx.cbWndExtra = 0;
 		wcx.hInstance = hInstance;
 		wcx.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_MAIN));
-		wcx.hCursor = (HCURSOR)LoadImage(hInstance, IDC_ARROW, IMAGE_CURSOR, 0, 0, LR_SHARED);
-		wcx.hbrBackground = (HBRUSH)COLOR_WINDOW;
-		wcx.lpszClassName = wndClass;
+		wcx.hCursor = LoadCursor(hInstance, IDC_ARROW);
+		wcx.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+		wcx.lpszClassName = wndClassName;
 		wcx.hIconSm = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_MAIN));
 
 		if (!RegisterClassEx(&wcx)) return;
@@ -303,9 +352,12 @@ void initCommonGamesaveWindow(int _action) {
     int screenWidth = GetSystemMetrics(SM_CXSCREEN);
     int screenHeight = GetSystemMetrics(SM_CYSCREEN);
 	int hwndWidth = 600;
-	int hwndHeight = 480;	
-	HWND hwnd = CreateWindowEx(0, wndClass, wndClass, WS_VISIBLE | WS_OVERLAPPEDWINDOW, (screenWidth - hwndWidth) / 2, (screenHeight - hwndHeight) / 2, 600, 480, 
-							   NULL, NULL, hInstance, NULL);
+	int hwndHeight = 480;
+	int centerX = (screenWidth - hwndWidth) / 2;
+	int centerY = (screenHeight - hwndHeight) / 2;
+	
+	HWND hwnd = CreateWindowEx(0, wndClassName, wndClassName, WS_VISIBLE | WS_OVERLAPPEDWINDOW, 
+							  centerX, centerY, 600, 480, NULL, NULL, hInstance, NULL);
 	if (!hwnd) return;
 	
 	ShowWindow(hwnd, SW_SHOW);
