@@ -4,7 +4,7 @@ WARNS=-Wall
 
 LDFLAGS=-s -lcomctl32 -Wl,--subsystem,windows
 RC=windres
-CFLAGS=-O3 -std=c99 -DUNICODE -D_UNICODE -D_WIN32_IE=0x0500 -DWINVER=0x500 ${WARNS}
+CFLAGS=-O2 -std=c99 -DUNICODE -D_UNICODE -D_WIN32_IE=0x0500 -DWINVER=0x500 ${WARNS}
 
 all: GamesaveHelper.exe
 
